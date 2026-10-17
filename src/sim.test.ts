@@ -4,10 +4,17 @@ import {
   bullets,
   collectBone,
   createRun,
+  damageNumbers,
+  enemies,
+  mulberry32,
+  phaseAt,
+  pickups,
   placePlane,
   releaseBulletAt,
   shotForBones,
+  showFinger,
   spawnBullet,
+  spawnPickup,
   step,
   type Input,
 } from "./sim";
@@ -137,6 +144,140 @@ describe("damage", () => {
     expect(run.hp).toBe(5);
     expect(run.bones).toBe(0);
     expect(bullets(run).some((bullet) => bullet.kind === "pink")).toBe(false);
+  });
+});
+
+describe("sortie", () => {
+  it("opens every run with 10 fry and refills that phase", () => {
+    const run = createRun(0, () => 0.4);
+    expect(phaseAt(0)).toBe("fry");
+    expect(enemies(run).filter((enemy) => enemy.kind === "fry")).toHaveLength(10);
+
+    for (const fry of enemies(run)) {
+      spawnBullet(run, {
+        x: fry.x,
+        y: fry.y,
+        vx: 0,
+        vy: 0,
+        r: 8,
+        kind: "gold",
+      });
+    }
+    step(run, 1 / 60, idle);
+    expect(enemies(run).filter((enemy) => enemy.kind === "fry").length).toBeLessThan(10);
+    expect(pickups(run).length).toBeGreaterThan(0);
+
+    for (let i = 0; i < 6; i++) {
+      step(run, 0.6, idle);
+    }
+    expect(run.time).toBeLessThan(60);
+    expect(run.phase).toBe("fry");
+    expect(enemies(run).filter((enemy) => enemy.kind === "fry").length).toBeGreaterThan(0);
+  });
+
+  it("changes phase at 60s and 150s and fields one boss", () => {
+    const run = createRun(0, () => 0.4);
+    step(run, 59, idle);
+    expect(run.phase).toBe("fry");
+    step(run, 1.2, idle);
+    expect(run.phase).toBe("medium");
+    expect(enemies(run).some((enemy) => enemy.kind === "boss")).toBe(false);
+    step(run, 90, idle);
+    expect(run.time).toBeGreaterThanOrEqual(150);
+    expect(run.phase).toBe("boss");
+    expect(enemies(run).filter((enemy) => enemy.kind === "boss")).toHaveLength(1);
+  });
+
+  it("picks up a bone near the body and ignores one that only crowds the nose", () => {
+    const run = createRun(0, () => 0.5);
+    spawnPickup(run, run.playerX, run.playerY - 40);
+    step(run, 1 / 60, idle);
+    expect(run.bones).toBe(0);
+    spawnPickup(run, run.playerX + 18, run.playerY + 10);
+    step(run, 1 / 60, idle);
+    expect(run.bones).toBe(1);
+  });
+
+  it("stores boss damage as the best score, including after a death", () => {
+    const run = createRun(0, mulberry32(4));
+    step(run, 149.9, idle);
+    step(run, 0.2, idle);
+    const boss = enemies(run).find((enemy) => enemy.kind === "boss");
+    expect(boss).toBeDefined();
+    spawnBullet(run, {
+      x: boss?.x ?? 0,
+      y: boss?.y ?? 0,
+      vx: 0,
+      vy: 0,
+      r: 6,
+      kind: "gold",
+    });
+    step(run, 1 / 60, idle);
+    expect(run.bossDamage).toBeGreaterThan(0);
+    expect(run.best).toBe(run.bossDamage);
+    expect(damageNumbers(run).length).toBeGreaterThan(0);
+    const best = run.best;
+
+    for (let hit = 0; hit < 8; hit++) {
+      spawnBullet(run, {
+        x: run.playerX,
+        y: run.playerY,
+        vx: 0,
+        vy: 0,
+        r: 3,
+        kind: "pink",
+      });
+      step(run, 1 / 60, idle);
+      if (run.bossDamage === 0 && run.hp === 5 && run.time < 1) {
+        break;
+      }
+      step(run, 2, idle);
+    }
+    expect(run.hp).toBe(5);
+    expect(run.bossDamage).toBe(0);
+    expect(run.best).toBeGreaterThanOrEqual(best);
+  });
+
+  it("ends a cleared clock with a flash and the same best score", () => {
+    const run = createRun(15, () => 0.2);
+    step(run, 179, idle);
+    expect(run.flash).toBe(0);
+    step(run, 1.2, idle);
+    expect(run.time).toBeGreaterThanOrEqual(180);
+    expect(run.flash).toBeGreaterThan(0);
+    step(run, 0.6, idle);
+    expect(run.time).toBeLessThan(2);
+    expect(run.best).toBe(15);
+    expect(enemies(run).filter((enemy) => enemy.kind === "fry")).toHaveLength(10);
+  });
+
+  it("hides the finger hint after the first drag", () => {
+    const run = createRun();
+    expect(showFinger(run)).toBe(true);
+    step(run, 1 / 60, { pointerX: 40, pointerY: 220, down: true });
+    expect(showFinger(run)).toBe(false);
+    step(run, 1 / 60, idle);
+    expect(showFinger(run)).toBe(false);
+  });
+
+  it("lets a swaying first run reach the boss with the laser", () => {
+    const run = createRun(0, mulberry32(2));
+    let deaths = 0;
+    let previous = 0;
+    for (let i = 0; i < 150 * 60; i++) {
+      const x = 60 + Math.sin(run.time * 1.4) * 34;
+      step(run, 1 / 60, { pointerX: x, pointerY: 250, down: true });
+      if (run.time + 0.001 < previous) {
+        deaths += 1;
+        break;
+      }
+      previous = run.time;
+    }
+    expect(deaths, `hp ${run.hp} bones ${run.bones} time ${run.time}`).toBe(0);
+    expect(run.time).toBeGreaterThanOrEqual(150);
+    expect(run.bones).toBeGreaterThanOrEqual(3);
+    expect(enemies(run).some((enemy) => enemy.kind === "boss")).toBe(true);
+    expect(run.hp).toBeGreaterThan(0);
   });
 });
 

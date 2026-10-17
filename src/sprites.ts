@@ -25,6 +25,9 @@ const PALETTE: Record<string, string> = {
   E: "#e7a0b4",
   G: "#f0c040",
   K: "#1c140e",
+  O: "#f0a050",
+  N: "#ffd0dc",
+  S: "#f1c7a6",
 };
 
 export const PLANE_NOSE_X = 7;
@@ -56,11 +59,76 @@ function bake(rows: readonly string[]): HTMLCanvasElement {
   return canvas;
 }
 
-let plane: HTMLCanvasElement | null = null;
+const FRY = [
+  "..DDDD..",
+  ".DWWWWWD",
+  "DWKKWWD.",
+  "DWWWWWD.",
+  ".DWWWWD.",
+  "..DDDD..",
+  "...DD...",
+];
+
+const MEDIUM = [
+  "...DDDDDD...",
+  "..DWWWWWWWD.",
+  ".DWKKWWKKWD.",
+  "DWWWWWWWWWD.",
+  ".DWBWWWWBWD.",
+  "..DDDDDDDD..",
+  "...DD..DD...",
+];
+
+const BOSS = [
+  "..DD........DD..",
+  ".DOOD......DOOD.",
+  ".DKOOD....DOOKD.",
+  "..DOODDDDDOOD...",
+  "..OWWWWWWWWWWO..",
+  ".OWWKKWWWWKKWWO.",
+  ".OWWWKWWWWKWWWO.",
+  ".OWWWWWWWWWWWWO.",
+  "..OWWNNWWWNNWO..",
+  "...OWWWWWWWWO...",
+  "....OWWWWWWWO...",
+  ".....OOOOOO.....",
+];
+
+const BONE = ["WW.WW.WW", "WWWWWWWW", "WW.WW.WW"];
+
+const FINGER = [
+  ".SS.",
+  ".SS.",
+  ".SS.",
+  "SSSS",
+  ".SS.",
+  ".SS.",
+  ".KK.",
+];
+
+const SHEETS = {
+  plane: PLANE,
+  fry: FRY,
+  medium: MEDIUM,
+  boss: BOSS,
+  bone: BONE,
+  finger: FINGER,
+} as const;
+
+export type SpriteName = keyof typeof SHEETS;
+
+const baked = new Map<SpriteName, HTMLCanvasElement>();
+
+export function sprite(name: SpriteName): HTMLCanvasElement {
+  const cached = baked.get(name);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const canvas = bake(SHEETS[name]);
+  baked.set(name, canvas);
+  return canvas;
+}
 
 export function planeSprite(): HTMLCanvasElement {
-  if (plane === null) {
-    plane = bake(PLANE);
-  }
-  return plane;
+  return sprite("plane");
 }
