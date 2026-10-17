@@ -1,8 +1,11 @@
+import { drawRun } from "./render";
 import { makeStars, type Star } from "./sky";
-import { WORLD_H, WORLD_W, fitFrame, type Frame } from "./viewport";
+import { createRun, step, type Input } from "./sim";
+import { WORLD_H, WORLD_W, clientToWorld, fitFrame, type Frame } from "./viewport";
 
 const FRAME = "#050514";
 const FIELD = "#0c1230";
+
 const canvasQuery = document.querySelector<HTMLCanvasElement>("#game");
 if (canvasQuery === null) {
   throw new Error("missing canvas");
@@ -25,9 +28,12 @@ const world = worldContext;
 
 const fieldStars = makeStars(48, 11);
 const frameStars = makeStars(80, 29);
+const run = createRun();
 
 let frame: Frame = fitFrame(1, 1);
-let started = performance.now();
+let last = performance.now();
+let activePointer: number | null = null;
+const input: Input = { pointerX: 0, pointerY: 0, down: false };
 
 function resize(): void {
   const viewW = Math.max(1, window.innerWidth);
@@ -43,6 +49,37 @@ function resize(): void {
   world.imageSmoothingEnabled = false;
 }
 
+function aim(event: PointerEvent): void {
+  const rect = canvas.getBoundingClientRect();
+  const point = clientToWorld(event.clientX - rect.left, event.clientY - rect.top, frame);
+  input.pointerX = point.x;
+  input.pointerY = point.y;
+  input.down = true;
+}
+
+function onDown(event: PointerEvent): void {
+  if (activePointer !== null) {
+    return;
+  }
+  activePointer = event.pointerId;
+  aim(event);
+}
+
+function onMove(event: PointerEvent): void {
+  if (event.pointerId !== activePointer) {
+    return;
+  }
+  aim(event);
+}
+
+function onUp(event: PointerEvent): void {
+  if (event.pointerId !== activePointer) {
+    return;
+  }
+  activePointer = null;
+  input.down = false;
+}
+
 function drawStars(
   target: CanvasRenderingContext2D,
   stars: readonly Star[],
@@ -54,33 +91,41 @@ function drawStars(
   for (const star of stars) {
     const y = (star.y * height + time * speed) % height;
     const x = star.x * width;
-    const light = star.tint > 0.7 ? "#f4f0d8" : "#9bb7e0";
-    target.fillStyle = light;
+    target.fillStyle = star.tint > 0.7 ? "#f4f0d8" : "#9bb7e0";
     target.fillRect(Math.floor(x), Math.floor(y), star.size, star.size);
   }
 }
 
 function draw(now: number): void {
-  const time = (now - started) / 1000;
+  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+  last = now;
+  step(run, dt, input);
+
   screen.imageSmoothingEnabled = false;
   world.imageSmoothingEnabled = false;
   screen.fillStyle = FRAME;
   screen.fillRect(0, 0, frame.viewW, frame.viewH);
-  drawStars(screen, frameStars, frame.viewW, frame.viewH, time, 6);
+  drawStars(screen, frameStars, frame.viewW, frame.viewH, run.time, 6);
 
   world.fillStyle = FIELD;
   world.fillRect(0, 0, WORLD_W, WORLD_H);
-  drawStars(world, fieldStars, WORLD_W, WORLD_H, time, 12);
+  drawStars(world, fieldStars, WORLD_W, WORLD_H, run.time, 12);
+  drawRun(world, run);
 
-  const dx = frame.originX;
-  const dy = frame.originY;
-  const dw = WORLD_W * frame.scale;
-  const dh = WORLD_H * frame.scale;
-  screen.drawImage(buffer, dx, dy, dw, dh);
-
+  screen.drawImage(
+    buffer,
+    frame.originX,
+    frame.originY,
+    WORLD_W * frame.scale,
+    WORLD_H * frame.scale,
+  );
   requestAnimationFrame(draw);
 }
 
+window.addEventListener("pointerdown", onDown);
+window.addEventListener("pointermove", onMove);
+window.addEventListener("pointerup", onUp);
+window.addEventListener("pointercancel", onUp);
 window.addEventListener("resize", resize);
 resize();
 requestAnimationFrame(draw);

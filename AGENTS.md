@@ -16,6 +16,8 @@ The Vite base path is `/shiba-shooter/`.
 
 `src/sky.ts` builds the night-sky stars.
 
-`src/main.ts` owns the canvas, the frame, and the draw loop.
+`src/main.ts` owns the canvas, pointer events, and the draw loop.
 
-Simulation and pointer input are not in this tree yet.
+`src/sim.ts` owns the run. `step` is the only writer. Pointer placement, shot level, HP, and bullet pools live there.
+
+`src/render.ts` draws the run. `src/sprites.ts` bakes the plane.
