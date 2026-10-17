@@ -1,4 +1,6 @@
+import { playClear, playTone, unlockAudio } from "./audio";
 import { drawRun } from "./render";
+import { readBest, writeBest } from "./score";
 import { makeStars, type Star } from "./sky";
 import { createRun, step, type Input } from "./sim";
 import { WORLD_H, WORLD_W, clientToWorld, fitFrame, type Frame } from "./viewport";
@@ -28,7 +30,24 @@ const world = worldContext;
 
 const fieldStars = makeStars(48, 11);
 const frameStars = makeStars(80, 29);
-const run = createRun();
+
+function bootBest(): number {
+  try {
+    return readBest(localStorage);
+  } catch {
+    return 0;
+  }
+}
+
+const run = createRun(bootBest());
+let storedBest = run.best;
+let lastBossTick = 0;
+const heard = {
+  bones: run.bones,
+  time: run.time,
+  flash: run.flash,
+  bossDamage: run.bossDamage,
+};
 
 let frame: Frame = fitFrame(1, 1);
 let last = performance.now();
@@ -58,6 +77,7 @@ function aim(event: PointerEvent): void {
 }
 
 function onDown(event: PointerEvent): void {
+  unlockAudio();
   if (activePointer !== null) {
     return;
   }
@@ -96,10 +116,39 @@ function drawStars(
   }
 }
 
+function cues(now: number): void {
+  if (run.bones > heard.bones) {
+    playTone(740, 0.05, "square", 0.04);
+  }
+  if (run.time < heard.time && heard.flash === 0) {
+    playTone(130, 0.12, "sawtooth", 0.05);
+  }
+  if (run.bossDamage > heard.bossDamage && now - lastBossTick > 90) {
+    lastBossTick = now;
+    playTone(880, 0.03, "square", 0.03);
+  }
+  if (run.flash > 0 && heard.flash === 0) {
+    playClear();
+  }
+  if (run.best !== storedBest) {
+    storedBest = run.best;
+    try {
+      writeBest(localStorage, run.best);
+    } catch {
+      storedBest = run.best;
+    }
+  }
+  heard.bones = run.bones;
+  heard.time = run.time;
+  heard.flash = run.flash;
+  heard.bossDamage = run.bossDamage;
+}
+
 function draw(now: number): void {
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
   last = now;
   step(run, dt, input);
+  cues(now);
 
   screen.imageSmoothingEnabled = false;
   world.imageSmoothingEnabled = false;
