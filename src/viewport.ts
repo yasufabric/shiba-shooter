@@ -1,5 +1,5 @@
-export const WORLD_W = 120;
-export const WORLD_H = 260;
+export const WORLD_W = 195;
+export const WORLD_H = 422;
 
 export type Frame = {
   scale: number;
@@ -13,7 +13,7 @@ export function fitFrame(viewW: number, viewH: number): Frame {
   const width = Math.max(1, viewW);
   const height = Math.max(1, viewH);
   const scale = Math.max(
-    1,
+    2,
     Math.floor(Math.min(width / WORLD_W, height / WORLD_H)),
   );
   const drawnW = WORLD_W * scale;
