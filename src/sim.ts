@@ -1,7 +1,6 @@
 import { createSlots, freeSlot, takeSlot, type Slots } from "./pool";
 import { WORLD_H, WORLD_W } from "./viewport";
 
-export const FINGER_LIFT = 36;
 export const BULLET_CAP = 1024;
 export const BEAM_HALF = 22;
 export const PICKUP_RADIUS = 24;
@@ -30,8 +29,7 @@ export type Phase = "fry" | "medium" | "boss";
 export type EnemyKind = "fry" | "medium" | "boss";
 
 export type Input = {
-  pointerX: number;
-  pointerY: number;
+  deltas: readonly { dx: number; dy: number }[];
   down: boolean;
 };
 
@@ -268,13 +266,10 @@ export function phaseAt(time: number): Phase {
   return "boss";
 }
 
-export function placePlane(
-  pointerX: number,
-  pointerY: number,
-): { x: number; y: number } {
+function movePlane(x: number, y: number, dx: number, dy: number): { x: number; y: number } {
   return {
-    x: Math.round(clamp(pointerX, 8, WORLD_W - 8)),
-    y: Math.round(clamp(pointerY - FINGER_LIFT, 8, WORLD_H - 18)),
+    x: clamp(Math.round(x + dx), 8, WORLD_W - 8),
+    y: clamp(Math.round(y + dy), 8, WORLD_H - 18),
   };
 }
 
@@ -475,16 +470,17 @@ function enemyName(code: number): EnemyKind {
 }
 
 function applyPointer(run: Run, input: Input): void {
-  if (!input.down) {
-    return;
+  if (input.down || input.deltas.length > 0) {
+    run.dragged = true;
   }
-  const placed = placePlane(input.pointerX, input.pointerY);
-  if (placed.x !== run.playerX || placed.y !== run.playerY) {
-    run.moving = true;
+  for (const delta of input.deltas) {
+    const next = movePlane(run.playerX, run.playerY, delta.dx, delta.dy);
+    if (next.x !== run.playerX || next.y !== run.playerY) {
+      run.moving = true;
+    }
+    run.playerX = next.x;
+    run.playerY = next.y;
   }
-  run.playerX = placed.x;
-  run.playerY = placed.y;
-  run.dragged = true;
 }
 
 function spreads(ways: 1 | 3 | 5): readonly number[] {
@@ -1343,12 +1339,11 @@ export function step(run: Run, dt: number, input: Input): void {
   run.invuln = Math.max(0, run.invuln - bounded);
   decayShake(run, bounded);
   run.moving = false;
+  applyPointer(run, input);
   if (motion <= 0) {
-    applyPointer(run, input);
     return;
   }
   enterPhase(run);
-  applyPointer(run, input);
   moveBullets(run.bullets, motion);
   moveBullets(run.hazards, motion);
   moveEnemies(run, motion);
@@ -1363,7 +1358,6 @@ export function step(run: Run, dt: number, input: Input): void {
   if (run.down > 0 || run.flash > 0) {
     return;
   }
-  applyPointer(run, input);
   const shot = shotForBones(run.bones);
   const interval = shot.kind === "laser" ? LASER_INTERVAL : PELLET_INTERVAL;
   run.fire -= motion;

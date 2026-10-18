@@ -1,5 +1,6 @@
 import { playClear, playTone, unlockAudio } from "./audio";
 import { NIGHT, PAPER } from "./palette";
+import { beginPointer, createDrag, endPointer, movePointer, type Drag } from "./pointer";
 import { drawRun } from "./render";
 import { readBest, writeBest } from "./score";
 import { makeStars, type Star } from "./sky";
@@ -49,8 +50,10 @@ const heard = {
 
 let frame: Frame = fitFrame(1, 1);
 let last = performance.now();
-let activePointer: number | null = null;
-const input: Input = { pointerX: 0, pointerY: 0, down: false };
+let drag: Drag = createDrag();
+let sawDown = false;
+let down = false;
+const deltas: { dx: number; dy: number }[] = [];
 
 function resize(): void {
   const viewW = Math.max(1, window.innerWidth);
@@ -66,36 +69,56 @@ function resize(): void {
   world.imageSmoothingEnabled = false;
 }
 
-function aim(event: PointerEvent): void {
+function canvasPoint(event: PointerEvent): { x: number; y: number } {
   const rect = canvas.getBoundingClientRect();
-  const point = clientToWorld(event.clientX - rect.left, event.clientY - rect.top, frame);
-  input.pointerX = point.x;
-  input.pointerY = point.y;
-  input.down = true;
+  return clientToWorld(event.clientX - rect.left, event.clientY - rect.top, frame);
+}
+
+function holdPointer(event: PointerEvent): void {
+  if (!canvas.hasPointerCapture(event.pointerId)) {
+    canvas.setPointerCapture(event.pointerId);
+  }
 }
 
 function onDown(event: PointerEvent): void {
+  event.preventDefault();
   unlockAudio();
-  if (activePointer !== null) {
-    return;
-  }
-  activePointer = event.pointerId;
-  aim(event);
+  const point = canvasPoint(event);
+  const next = beginPointer(drag, event.pointerId, point.x, point.y);
+  drag = next.drag;
+  sawDown = true;
+  down = true;
+  holdPointer(event);
 }
 
 function onMove(event: PointerEvent): void {
-  if (event.pointerId !== activePointer) {
-    return;
+  event.preventDefault();
+  const coalesced = event.getCoalescedEvents();
+  const samples = (coalesced.length > 0 ? coalesced : [event]).map(canvasPoint);
+  const next = movePointer(drag, event.pointerId, samples);
+  drag = next.drag;
+  for (const delta of next.deltas) {
+    deltas.push(delta);
   }
-  aim(event);
+  if (drag.points.some((point) => point.id === event.pointerId)) {
+    holdPointer(event);
+  }
 }
 
 function onUp(event: PointerEvent): void {
-  if (event.pointerId !== activePointer) {
-    return;
+  event.preventDefault();
+  const next = endPointer(drag, event.pointerId);
+  drag = next.drag;
+  down = drag.points.length > 0;
+  if (canvas.hasPointerCapture(event.pointerId)) {
+    canvas.releasePointerCapture(event.pointerId);
   }
-  activePointer = null;
-  input.down = false;
+}
+
+function onLost(event: PointerEvent): void {
+  if (drag.points.some((point) => point.id === event.pointerId)) {
+    holdPointer(event);
+  }
 }
 
 function drawStars(
@@ -145,7 +168,10 @@ function cues(now: number): void {
 function draw(now: number): void {
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
   last = now;
-  step(run, dt, input);
+  const frameInput: Input = { deltas, down: down || sawDown };
+  step(run, dt, frameInput);
+  deltas.length = 0;
+  sawDown = false;
   cues(now);
 
   screen.imageSmoothingEnabled = false;
@@ -177,10 +203,24 @@ function draw(now: number): void {
   requestAnimationFrame(draw);
 }
 
-window.addEventListener("pointerdown", onDown);
-window.addEventListener("pointermove", onMove);
-window.addEventListener("pointerup", onUp);
-window.addEventListener("pointercancel", onUp);
+const pointerOpts: AddEventListenerOptions = { passive: false };
+window.addEventListener("pointerdown", onDown, pointerOpts);
+window.addEventListener("pointermove", onMove, pointerOpts);
+window.addEventListener("pointerup", onUp, pointerOpts);
+window.addEventListener("pointercancel", onUp, pointerOpts);
+window.addEventListener("lostpointercapture", onLost);
+window.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+});
+window.addEventListener("selectstart", (event) => {
+  event.preventDefault();
+});
+window.addEventListener("touchstart", (event) => {
+  event.preventDefault();
+}, pointerOpts);
+window.addEventListener("touchmove", (event) => {
+  event.preventDefault();
+}, pointerOpts);
 window.addEventListener("resize", resize);
 resize();
 requestAnimationFrame(draw);

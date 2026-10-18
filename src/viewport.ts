@@ -33,7 +33,7 @@ export function clientToWorld(
   frame: Frame,
 ): { x: number; y: number } {
   return {
-    x: (clientX - frame.originX) / frame.scale,
-    y: (clientY - frame.originY) / frame.scale,
+    x: Math.round((clientX - frame.originX) / frame.scale),
+    y: Math.round((clientY - frame.originY) / frame.scale),
   };
 }

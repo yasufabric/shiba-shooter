@@ -10,7 +10,6 @@ import {
   mulberry32,
   phaseAt,
   pickups,
-  placePlane,
   releaseBulletAt,
   shotForBones,
   showFinger,
@@ -19,39 +18,40 @@ import {
   step,
   type Input,
 } from "./sim";
-import { WORLD_H, WORLD_W, clientToWorld, fitFrame } from "./viewport";
+import { WORLD_H, WORLD_W } from "./viewport";
 
-const idle: Input = { pointerX: 0, pointerY: 0, down: false };
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
+const idle: Input = { deltas: [], down: false };
 
 describe("pointer", () => {
-  it("places the plane 36 pixels above the finger with no smoothing", () => {
+  it("moves the plane by the finger delta and keeps it on the screen", () => {
     const run = createRun();
-    step(run, 1 / 60, { pointerX: 60, pointerY: 200, down: true });
-    expect(run.playerX).toBe(60);
-    expect(run.playerY).toBe(200 - 36);
+    const startX = run.playerX;
+    const startY = run.playerY;
+    step(run, 1 / 60, { deltas: [{ dx: 10, dy: -4 }], down: true });
+    expect(run.playerX).toBe(startX + 10);
+    expect(run.playerY).toBe(startY - 4);
+    expect(run.playerX).not.toBe(10);
+    expect(run.playerY).not.toBe(200);
 
-    step(run, 1 / 60, { pointerX: 12, pointerY: 40, down: true });
-    expect(run.playerX).toBe(clamp(12, 8, WORLD_W - 8));
-    expect(run.playerY).toBe(clamp(40 - 36, 8, WORLD_H - 18));
-    expect(run.playerX).not.toBeCloseTo((60 + 12) / 2, 0);
-    expect(run.playerY).toBe(placePlane(12, 40).y);
-  });
+    step(run, 1 / 60, { deltas: [{ dx: 3, dy: 0 }, { dx: -1, dy: 1 }], down: true });
+    expect(run.playerX).toBe(startX + 12);
+    expect(run.playerY).toBe(startY - 3);
 
-  it("maps a phone pixel through the frame into world space", () => {
-    const frame = fitFrame(390, 844);
-    const origin = clientToWorld(frame.originX, frame.originY, frame);
-    expect(origin).toEqual({ x: 0, y: 0 });
-    const aimed = clientToWorld(
-      frame.originX + 60 * frame.scale,
-      frame.originY + 200 * frame.scale,
-      frame,
-    );
-    expect(aimed.x).toBeCloseTo(60);
-    expect(aimed.y).toBeCloseTo(200);
+    step(run, 1 / 60, { deltas: [{ dx: -1000, dy: -1000 }], down: true });
+    expect(run.playerX).toBe(8);
+    expect(run.playerY).toBe(8);
+    step(run, 1 / 60, { deltas: [{ dx: 1000, dy: 1000 }], down: true });
+    expect(run.playerX).toBe(WORLD_W - 8);
+    expect(run.playerY).toBe(WORLD_H - 18);
+    step(run, 1 / 60, {
+      deltas: [
+        { dx: 4, dy: 0 },
+        { dx: -1, dy: 0 },
+      ],
+      down: true,
+    });
+    expect(run.playerX).toBe(WORLD_W - 8 - 1);
+    expect(run.playerY).toBe(WORLD_H - 18);
   });
 });
 
@@ -291,7 +291,7 @@ describe("sortie", () => {
   it("hides the finger hint after the first drag", () => {
     const run = createRun();
     expect(showFinger(run)).toBe(true);
-    step(run, 1 / 60, { pointerX: 40, pointerY: 220, down: true });
+    step(run, 1 / 60, { deltas: [], down: true });
     expect(showFinger(run)).toBe(false);
     step(run, 1 / 60, idle);
     expect(showFinger(run)).toBe(false);
@@ -303,7 +303,10 @@ describe("sortie", () => {
     let previous = 0;
     for (let i = 0; i < 150 * 60; i++) {
       const x = 98 + Math.sin(run.time * 1.4) * 34;
-      step(run, 1 / 60, { pointerX: x, pointerY: 250, down: true });
+      step(run, 1 / 60, {
+        deltas: [{ dx: x - run.playerX, dy: 214 - run.playerY }],
+        down: true,
+      });
       if (run.time + 0.001 < previous) {
         deaths += 1;
         break;
