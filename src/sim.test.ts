@@ -291,7 +291,7 @@ describe("sortie", () => {
   it("hides the finger hint after the first drag", () => {
     const run = createRun();
     expect(showFinger(run)).toBe(true);
-    step(run, 1 / 60, { pointerX: 40, pointerY: 220, down: true });
+    step(run, 1 / 60, { deltas: [], down: true });
     expect(showFinger(run)).toBe(false);
     step(run, 1 / 60, idle);
     expect(showFinger(run)).toBe(false);
@@ -303,7 +303,10 @@ describe("sortie", () => {
     let previous = 0;
     for (let i = 0; i < 150 * 60; i++) {
       const x = 98 + Math.sin(run.time * 1.4) * 34;
-      step(run, 1 / 60, { pointerX: x, pointerY: 250, down: true });
+      step(run, 1 / 60, {
+        deltas: [{ dx: x - run.playerX, dy: 214 - run.playerY }],
+        down: true,
+      });
       if (run.time + 0.001 < previous) {
         deaths += 1;
         break;
