@@ -8,6 +8,13 @@ export const PICKUP_RADIUS = 24;
 
 const MAX_HP = 5;
 const INVULN_SECONDS = 2;
+const FX_CAP = 128;
+const HIT_FLASH = 0.06;
+const HITSTOP = 0.05;
+export const DEATH_TIME = 0.24;
+export const ATTACK_TIME = 4 / 12;
+export const NOSE_SIZE = 2;
+export const PLAYER_Y = 360;
 const PELLET_INTERVAL = 0.08;
 const LASER_INTERVAL = 1 / 30;
 const PELLET_VY = -210;
@@ -52,6 +59,8 @@ type EnemyPool = {
   r: Float32Array;
   cooldown: Float32Array;
   kind: Uint8Array;
+  pose: Float32Array;
+  flash: Float32Array;
 };
 
 type PickupPool = {
@@ -70,6 +79,29 @@ type NumberPool = {
   life: Float32Array;
 };
 
+type FxPool = {
+  slots: Slots;
+  x: Float32Array;
+  y: Float32Array;
+  vx: Float32Array;
+  vy: Float32Array;
+  life: Float32Array;
+  kind: Uint8Array;
+  size: Uint8Array;
+  sprite: Uint8Array;
+};
+
+export type FxKind = "particle" | "boom" | "spin";
+
+export type FxView = {
+  x: number;
+  y: number;
+  life: number;
+  kind: FxKind;
+  size: number;
+  sprite: number;
+};
+
 export type Run = {
   time: number;
   phase: Phase;
@@ -84,6 +116,12 @@ export type Run = {
   dragged: boolean;
   fire: number;
   beamClock: number;
+  moving: boolean;
+  hitFlash: number;
+  hitstop: number;
+  shake: number;
+  shakeClock: number;
+  down: number;
   fryTimer: number;
   waveTimer: number;
   rng: () => number;
@@ -92,6 +130,7 @@ export type Run = {
   enemies: EnemyPool;
   pickups: PickupPool;
   numbers: NumberPool;
+  fx: FxPool;
 };
 
 export type BulletView = {
@@ -152,6 +191,22 @@ function createEnemyPool(): EnemyPool {
     r: new Float32Array(ENEMY_CAP),
     cooldown: new Float32Array(ENEMY_CAP),
     kind: new Uint8Array(ENEMY_CAP),
+    pose: new Float32Array(ENEMY_CAP),
+    flash: new Float32Array(ENEMY_CAP),
+  };
+}
+
+function createFxPool(): FxPool {
+  return {
+    slots: createSlots(FX_CAP),
+    x: new Float32Array(FX_CAP),
+    y: new Float32Array(FX_CAP),
+    vx: new Float32Array(FX_CAP),
+    vy: new Float32Array(FX_CAP),
+    life: new Float32Array(FX_CAP),
+    kind: new Uint8Array(FX_CAP),
+    size: new Uint8Array(FX_CAP),
+    sprite: new Uint8Array(FX_CAP),
   };
 }
 
@@ -218,8 +273,8 @@ export function placePlane(
   pointerY: number,
 ): { x: number; y: number } {
   return {
-    x: clamp(pointerX, 8, WORLD_W - 8),
-    y: clamp(pointerY - FINGER_LIFT, 8, WORLD_H - 18),
+    x: Math.round(clamp(pointerX, 8, WORLD_W - 8)),
+    y: Math.round(clamp(pointerY - FINGER_LIFT, 8, WORLD_H - 18)),
   };
 }
 
@@ -250,11 +305,17 @@ export function createRun(best = 0, rng: () => number = Math.random): Run {
     bossDamage: 0,
     best,
     flash: 0,
-    playerX: WORLD_W / 2,
-    playerY: 214,
+    playerX: Math.round(WORLD_W / 2),
+    playerY: PLAYER_Y,
     dragged: false,
     fire: 0,
     beamClock: 0,
+    moving: false,
+    hitFlash: 0,
+    hitstop: 0,
+    shake: 0,
+    shakeClock: 0,
+    down: 0,
     fryTimer: 0.4,
     waveTimer: 1.2,
     rng,
@@ -263,6 +324,7 @@ export function createRun(best = 0, rng: () => number = Math.random): Run {
     enemies: createEnemyPool(),
     pickups: createPickupPool(),
     numbers: createNumberPool(),
+    fx: createFxPool(),
   };
   openFry(run);
   return run;
@@ -417,6 +479,9 @@ function applyPointer(run: Run, input: Input): void {
     return;
   }
   const placed = placePlane(input.pointerX, input.pointerY);
+  if (placed.x !== run.playerX || placed.y !== run.playerY) {
+    run.moving = true;
+  }
   run.playerX = placed.x;
   run.playerY = placed.y;
   run.dragged = true;
@@ -508,7 +573,7 @@ function openFry(run: Run): void {
     const col = i % 5;
     spawnEnemy(run, {
       kind: "fry",
-      x: 16 + col * 22,
+      x: 54 + col * 22,
       y: 30 + Math.floor(i / 5) * 24,
       hp: 1,
       r: 6,
@@ -522,7 +587,7 @@ function openFry(run: Run): void {
 function spawnBoss(run: Run): void {
   spawnEnemy(run, {
     kind: "boss",
-    x: 60,
+    x: 98,
     y: 42,
     hp: BOSS_HP,
     r: 16,
@@ -564,6 +629,8 @@ function freeEnemy(run: Run, index: number): void {
   pool.r[index] = 0;
   pool.cooldown[index] = 0;
   pool.kind[index] = 0;
+  pool.pose[index] = 0;
+  pool.flash[index] = 0;
   freeSlot(pool.slots, index);
 }
 
@@ -629,8 +696,10 @@ function moveEnemies(run: Run, dt: number): void {
     if (pool.slots.live[i] === 0) {
       continue;
     }
+    pool.pose[i] = Math.max(0, (pool.pose[i] ?? 0) - dt);
+    pool.flash[i] = Math.max(0, (pool.flash[i] ?? 0) - dt);
     if (pool.kind[i] === ENEMY_CODE.boss) {
-      pool.x[i] = 60 + Math.sin(run.time * 0.7) * 22;
+      pool.x[i] = 98 + Math.sin(run.time * 0.7) * 22;
       pool.y[i] = 42;
       continue;
     }
@@ -684,6 +753,132 @@ function moveNumbers(run: Run, dt: number): void {
   }
 }
 
+function decayShake(run: Run, dt: number): void {
+  let left = dt;
+  while (run.shake > 0 && left > 0) {
+    if (run.shakeClock > left) {
+      run.shakeClock -= left;
+      return;
+    }
+    left -= run.shakeClock;
+    run.shake -= 1;
+    run.shakeClock = 0.04;
+  }
+}
+
+function clearFx(run: Run): void {
+  const pool = run.fx;
+  for (let i = 0; i < pool.slots.cap; i++) {
+    if (pool.slots.live[i] !== 0) {
+      freeFx(run, i);
+    }
+  }
+}
+
+function freeFx(run: Run, index: number): void {
+  const pool = run.fx;
+  pool.x[index] = 0;
+  pool.y[index] = 0;
+  pool.vx[index] = 0;
+  pool.vy[index] = 0;
+  pool.life[index] = 0;
+  pool.kind[index] = 0;
+  pool.size[index] = 0;
+  pool.sprite[index] = 0;
+  freeSlot(pool.slots, index);
+}
+
+function spawnFx(
+  run: Run,
+  fx: {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    life: number;
+    kind: number;
+    size: number;
+    sprite: number;
+  },
+): void {
+  const index = takeSlot(run.fx.slots);
+  if (index < 0) {
+    return;
+  }
+  const pool = run.fx;
+  pool.x[index] = fx.x;
+  pool.y[index] = fx.y;
+  pool.vx[index] = fx.vx;
+  pool.vy[index] = fx.vy;
+  pool.life[index] = fx.life;
+  pool.kind[index] = fx.kind;
+  pool.size[index] = fx.size;
+  pool.sprite[index] = fx.sprite;
+}
+
+function spawnBoom(run: Run, x: number, y: number): void {
+  spawnFx(run, { x, y, vx: 0, vy: 0, life: DEATH_TIME, kind: 2, size: 0, sprite: 0 });
+}
+
+function spawnSpin(run: Run, x: number, y: number, sprite: number): void {
+  spawnFx(run, { x, y, vx: 0, vy: 28, life: DEATH_TIME, kind: 3, size: 0, sprite });
+}
+
+function burst(run: Run, x: number, y: number): void {
+  const sizes = [1, 2, 3, 2, 1, 3, 2, 1];
+  for (let i = 0; i < sizes.length; i++) {
+    const angle = (i / sizes.length) * Math.PI * 2;
+    spawnFx(run, {
+      x,
+      y,
+      vx: Math.cos(angle) * 24,
+      vy: Math.sin(angle) * 24,
+      life: 0.4,
+      kind: 1,
+      size: sizes[i] ?? 1,
+      sprite: i,
+    });
+  }
+}
+
+function boomFrame(life: number): number {
+  const elapsed = DEATH_TIME - life;
+  return Math.max(0, Math.min(3, Math.floor(elapsed / (DEATH_TIME / 4))));
+}
+
+function updateFx(run: Run, dt: number): void {
+  const pool = run.fx;
+  for (let i = 0; i < pool.slots.cap; i++) {
+    if (pool.slots.live[i] === 0) {
+      continue;
+    }
+    const before = pool.life[i] ?? 0;
+    pool.life[i] = before - dt;
+    pool.x[i] = (pool.x[i] ?? 0) + (pool.vx[i] ?? 0) * dt;
+    pool.y[i] = (pool.y[i] ?? 0) + (pool.vy[i] ?? 0) * dt;
+    if ((pool.kind[i] ?? 0) === 2 && (pool.sprite[i] ?? 0) === 0) {
+      const next = boomFrame(pool.life[i] ?? 0);
+      if (boomFrame(before) < 3 && next >= 3) {
+        pool.sprite[i] = 1;
+        burst(run, pool.x[i] ?? 0, pool.y[i] ?? 0);
+      }
+    }
+    if ((pool.life[i] ?? 0) <= 0) {
+      freeFx(run, i);
+    }
+  }
+}
+
+function fxKind(code: number): FxKind {
+  if (code === 2) {
+    return "boom";
+  }
+  if (code === 3) {
+    return "spin";
+  }
+  return "particle";
+}
+
 function spawnNumber(run: Run, x: number, y: number, value: number): void {
   const index = takeSlot(run.numbers.slots);
   if (index < 0) {
@@ -721,10 +916,12 @@ function attackEnemies(run: Run, dt: number): void {
     switch (kind) {
       case "fry":
         pool.cooldown[i] = 3.2;
+        pool.pose[i] = ATTACK_TIME;
         aimPink(run, x, y, 22, 36);
         break;
       case "medium":
         pool.cooldown[i] = 2;
+        pool.pose[i] = ATTACK_TIME;
         aimPink(run, x, y - 4, 30, 14);
         aimPink(run, x, y - 4, 30, 14);
         break;
@@ -787,6 +984,7 @@ function setBossCooldown(pool: EnemyPool, value: number): void {
   for (let i = 0; i < pool.slots.cap; i++) {
     if (pool.slots.live[i] !== 0 && pool.kind[i] === ENEMY_CODE.boss) {
       pool.cooldown[i] = value;
+      pool.pose[i] = ATTACK_TIME;
     }
   }
 }
@@ -798,7 +996,7 @@ function spawnWave(run: Run, dt: number): void {
       run.fryTimer = 0.55;
       spawnEnemy(run, {
         kind: "fry",
-        x: 12 + run.rng() * (WORLD_W - 24),
+        x: 50 + run.rng() * 96,
         y: 16,
         hp: 1,
         r: 6,
@@ -816,7 +1014,7 @@ function spawnWave(run: Run, dt: number): void {
       for (const lane of [0, 1]) {
         spawnEnemy(run, {
           kind: "medium",
-          x: lane === 0 ? 28 : WORLD_W - 28,
+          x: lane === 0 ? 66 : 130,
           y: 18,
           hp: 3,
           r: 9,
@@ -858,11 +1056,18 @@ function hurtEnemy(run: Run, index: number, amount: number): void {
     noteBest(run);
     spawnNumber(run, pool.x[index] ?? 0, (pool.y[index] ?? 0) + 8, amount);
   }
+  pool.flash[index] = HIT_FLASH;
+  run.shake = Math.min(3, Math.max(run.shake, kind === "boss" ? 3 : 2));
+  run.shakeClock = 0.04;
   if ((pool.hp[index] ?? 0) > 0) {
     return;
   }
+  const ex = pool.x[index] ?? 0;
+  const ey = pool.y[index] ?? 0;
+  spawnSpin(run, ex, ey, pool.kind[index] ?? 1);
+  spawnBoom(run, ex, ey);
   if (kind !== "boss") {
-    spawnPickup(run, pool.x[index] ?? 0, pool.y[index] ?? 0);
+    spawnPickup(run, ex, ey);
   } else {
     run.flash = 0.5;
   }
@@ -954,10 +1159,7 @@ function hitNose(run: Run): void {
     if (pool.slots.live[i] === 0) {
       continue;
     }
-    const dx = (pool.x[i] ?? 0) - run.playerX;
-    const dy = (pool.y[i] ?? 0) - run.playerY;
-    const radius = pool.r[i] ?? 0;
-    if (dx * dx + dy * dy > radius * radius) {
+    if (!hitsNose(pool.x[i] ?? 0, pool.y[i] ?? 0, pool.r[i] ?? 0, run.playerX, run.playerY)) {
       continue;
     }
     clearBullet(pool, i);
@@ -966,11 +1168,26 @@ function hitNose(run: Run): void {
     }
     run.hp -= 1;
     run.invuln = INVULN_SECONDS;
+    run.hitFlash = HIT_FLASH;
+    run.hitstop = Math.max(run.hitstop, HITSTOP);
+    run.shake = 3;
+    run.shakeClock = 0.04;
     if (run.hp <= 0) {
-      resetRun(run);
+      run.hp = 0;
+      run.down = DEATH_TIME;
       return;
     }
   }
+}
+
+function hitsNose(bx: number, by: number, br: number, px: number, py: number): boolean {
+  const left = Math.round(px) - 1;
+  const top = Math.round(py) - 1;
+  const nearestX = clamp(bx, left, left + NOSE_SIZE);
+  const nearestY = clamp(by, top, top + NOSE_SIZE);
+  const dx = bx - nearestX;
+  const dy = by - nearestY;
+  return dx * dx + dy * dy <= br * br;
 }
 
 function resetRun(run: Run): void {
@@ -985,16 +1202,23 @@ function resetRun(run: Run): void {
   run.bossDamage = 0;
   run.best = best;
   run.flash = 0;
-  run.playerX = WORLD_W / 2;
-  run.playerY = 214;
+  run.playerX = Math.round(WORLD_W / 2);
+  run.playerY = PLAYER_Y;
   run.dragged = dragged;
   run.fire = 0;
   run.beamClock = 0;
+  run.moving = false;
+  run.hitFlash = 0;
+  run.hitstop = 0;
+  run.shake = 0;
+  run.shakeClock = 0;
+  run.down = 0;
   run.fryTimer = 0.4;
   run.waveTimer = 1.2;
   run.rng = rng;
   clearPool(run.bullets);
   clearPool(run.hazards);
+  clearFx(run);
   for (let i = 0; i < run.enemies.slots.cap; i++) {
     if (run.enemies.slots.live[i] !== 0) {
       freeEnemy(run, i);
@@ -1031,14 +1255,21 @@ export function visitBullets(
 
 export function visitEnemies(
   run: Run,
-  visit: (x: number, y: number, kind: EnemyKind) => void,
+  visit: (x: number, y: number, kind: EnemyKind, pose: number, flash: number, vx: number) => void,
 ): void {
   const pool = run.enemies;
   for (let i = 0; i < pool.slots.cap; i++) {
     if (pool.slots.live[i] === 0) {
       continue;
     }
-    visit(pool.x[i] ?? 0, pool.y[i] ?? 0, enemyName(pool.kind[i] ?? 0));
+    visit(
+      pool.x[i] ?? 0,
+      pool.y[i] ?? 0,
+      enemyName(pool.kind[i] ?? 0),
+      pool.pose[i] ?? 0,
+      pool.flash[i] ?? 0,
+      pool.vx[i] ?? 0,
+    );
   }
 }
 
@@ -1052,6 +1283,23 @@ export function visitPickups(
       continue;
     }
     visit(pool.x[i] ?? 0, pool.y[i] ?? 0);
+  }
+}
+
+export function visitFx(run: Run, visit: (fx: FxView) => void): void {
+  const pool = run.fx;
+  for (let i = 0; i < pool.slots.cap; i++) {
+    if (pool.slots.live[i] === 0) {
+      continue;
+    }
+    visit({
+      x: pool.x[i] ?? 0,
+      y: pool.y[i] ?? 0,
+      life: pool.life[i] ?? 0,
+      kind: fxKind(pool.kind[i] ?? 0),
+      size: pool.size[i] ?? 1,
+      sprite: pool.sprite[i] ?? 0,
+    });
   }
 }
 
@@ -1077,27 +1325,48 @@ export function step(run: Run, dt: number, input: Input): void {
     }
     return;
   }
-  run.time += bounded;
-  enterPhase(run);
-  applyPointer(run, input);
-  run.invuln = Math.max(0, run.invuln - bounded);
-  moveBullets(run.bullets, bounded);
-  moveBullets(run.hazards, bounded);
-  moveEnemies(run, bounded);
-  movePickups(run, bounded);
-  moveNumbers(run, bounded);
-  spawnWave(run, bounded);
-  attackEnemies(run, bounded);
-  fight(run, bounded);
-  collectPickups(run);
-  hitNose(run);
-  applyPointer(run, input);
-  if (run.flash > 0) {
+  if (run.down > 0) {
+    run.down -= bounded;
+    if (run.down <= 0) {
+      resetRun(run);
+    }
     return;
   }
+  let motion = bounded;
+  if (run.hitstop > 0) {
+    const held = Math.min(run.hitstop, motion);
+    run.hitstop -= held;
+    motion -= held;
+  }
+  run.time += bounded;
+  run.hitFlash = Math.max(0, run.hitFlash - bounded);
+  run.invuln = Math.max(0, run.invuln - bounded);
+  decayShake(run, bounded);
+  run.moving = false;
+  if (motion <= 0) {
+    applyPointer(run, input);
+    return;
+  }
+  enterPhase(run);
+  applyPointer(run, input);
+  moveBullets(run.bullets, motion);
+  moveBullets(run.hazards, motion);
+  moveEnemies(run, motion);
+  movePickups(run, motion);
+  moveNumbers(run, motion);
+  updateFx(run, motion);
+  spawnWave(run, motion);
+  attackEnemies(run, motion);
+  fight(run, motion);
+  collectPickups(run);
+  hitNose(run);
+  if (run.down > 0 || run.flash > 0) {
+    return;
+  }
+  applyPointer(run, input);
   const shot = shotForBones(run.bones);
   const interval = shot.kind === "laser" ? LASER_INTERVAL : PELLET_INTERVAL;
-  run.fire -= bounded;
+  run.fire -= motion;
   let guard = 0;
   while (run.fire <= 0 && guard < 8) {
     shoot(run);

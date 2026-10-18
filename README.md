@@ -1,6 +1,6 @@
 # shiba-shooter
 
-Portrait shoot-'em-up. The playfield is a 120 by 260 pixel buffer, integer-scaled inside the phone viewport. The margin is the night sky.
+Portrait shoot-'em-up. The playfield is a 195 by 422 pixel buffer. It integer-scales by at least 2 and fills a 390 by 844 viewport.
 
 ```bash
 npm test

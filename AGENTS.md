@@ -20,4 +20,4 @@ The Vite base path is `/shiba-shooter/`.
 
 `src/sim.ts` owns the run. `step` is the only writer. Pointer placement, shot level, HP, phases, enemies, and bullet pools live there.
 
-`src/render.ts` draws the run. `src/sprites.ts` bakes the pixel sprites. `src/score.ts` parses the saved best score. `src/audio.ts` plays the original tones.
+`src/render.ts` draws the run. `src/palette.ts` is the only color list. `src/font.ts` draws the damage digits. `src/sprites.ts` bakes the pixel sprites. `src/score.ts` parses the saved best score. `src/audio.ts` plays the original tones.

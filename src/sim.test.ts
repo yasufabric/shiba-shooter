@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BULLET_CAP,
+  NOSE_SIZE,
   bullets,
   collectBone,
   createRun,
@@ -84,6 +85,35 @@ describe("shot growth", () => {
 });
 
 describe("damage", () => {
+  it("treats the nose as a 2 by 2 block", () => {
+    const run = createRun();
+    expect(NOSE_SIZE).toBe(2);
+    const left = Math.round(run.playerX) - 1;
+    const top = Math.round(run.playerY) - 1;
+    spawnBullet(run, {
+      x: left + NOSE_SIZE,
+      y: top + NOSE_SIZE,
+      vx: 0,
+      vy: 0,
+      r: 0.1,
+      kind: "pink",
+    });
+    step(run, 1 / 60, idle);
+    expect(run.hp).toBe(4);
+
+    const miss = createRun();
+    spawnBullet(miss, {
+      x: miss.playerX - 8,
+      y: miss.playerY,
+      vx: 0,
+      vy: 0,
+      r: 0.1,
+      kind: "pink",
+    });
+    step(miss, 1 / 60, idle);
+    expect(miss.hp).toBe(5);
+  });
+
   it("removes one HP and ignores hits during 2 seconds of invincibility", () => {
     const run = createRun();
     spawnBullet(run, {
@@ -141,6 +171,7 @@ describe("damage", () => {
         step(run, 2, idle);
       }
     }
+    step(run, 0.35, idle);
     expect(run.hp).toBe(5);
     expect(run.bones).toBe(0);
     expect(bullets(run).some((bullet) => bullet.kind === "pink")).toBe(false);
@@ -218,20 +249,26 @@ describe("sortie", () => {
     expect(damageNumbers(run).length).toBeGreaterThan(0);
     const best = run.best;
 
-    for (let hit = 0; hit < 8; hit++) {
-      spawnBullet(run, {
-        x: run.playerX,
-        y: run.playerY,
-        vx: 0,
-        vy: 0,
-        r: 3,
-        kind: "pink",
-      });
-      step(run, 1 / 60, idle);
+    for (let hit = 0; hit < 12; hit++) {
+      if (run.down > 0) {
+        step(run, 0.3, idle);
+      } else {
+        spawnBullet(run, {
+          x: run.playerX,
+          y: run.playerY,
+          vx: 0,
+          vy: 0,
+          r: 3,
+          kind: "pink",
+        });
+        step(run, 1 / 60, idle);
+      }
       if (run.bossDamage === 0 && run.hp === 5 && run.time < 1) {
         break;
       }
-      step(run, 2, idle);
+      if (run.down === 0) {
+        step(run, 2, idle);
+      }
     }
     expect(run.hp).toBe(5);
     expect(run.bossDamage).toBe(0);
@@ -265,7 +302,7 @@ describe("sortie", () => {
     let deaths = 0;
     let previous = 0;
     for (let i = 0; i < 150 * 60; i++) {
-      const x = 60 + Math.sin(run.time * 1.4) * 34;
+      const x = 98 + Math.sin(run.time * 1.4) * 34;
       step(run, 1 / 60, { pointerX: x, pointerY: 250, down: true });
       if (run.time + 0.001 < previous) {
         deaths += 1;

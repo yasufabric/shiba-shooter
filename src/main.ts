@@ -1,12 +1,10 @@
 import { playClear, playTone, unlockAudio } from "./audio";
+import { NIGHT, PAPER } from "./palette";
 import { drawRun } from "./render";
 import { readBest, writeBest } from "./score";
 import { makeStars, type Star } from "./sky";
 import { createRun, step, type Input } from "./sim";
 import { WORLD_H, WORLD_W, clientToWorld, fitFrame, type Frame } from "./viewport";
-
-const FRAME = "#050514";
-const FIELD = "#0c1230";
 
 const canvasQuery = document.querySelector<HTMLCanvasElement>("#game");
 if (canvasQuery === null) {
@@ -109,10 +107,10 @@ function drawStars(
   speed: number,
 ): void {
   for (const star of stars) {
-    const y = (star.y * height + time * speed) % height;
-    const x = star.x * width;
-    target.fillStyle = star.tint > 0.7 ? "#f4f0d8" : "#9bb7e0";
-    target.fillRect(Math.floor(x), Math.floor(y), star.size, star.size);
+    const y = Math.round((star.y * height + time * speed) % height);
+    const x = Math.round(star.x * width);
+    target.fillStyle = star.tint > 0.7 ? PAPER : NIGHT[3];
+    target.fillRect(x, y, star.size, star.size);
   }
 }
 
@@ -152,19 +150,27 @@ function draw(now: number): void {
 
   screen.imageSmoothingEnabled = false;
   world.imageSmoothingEnabled = false;
-  screen.fillStyle = FRAME;
+  screen.fillStyle = NIGHT[0];
   screen.fillRect(0, 0, frame.viewW, frame.viewH);
   drawStars(screen, frameStars, frame.viewW, frame.viewH, run.time, 6);
 
-  world.fillStyle = FIELD;
+  world.fillStyle = NIGHT[0];
   world.fillRect(0, 0, WORLD_W, WORLD_H);
+  world.fillStyle = NIGHT[1];
+  world.fillRect(0, WORLD_H - 48, WORLD_W, 28);
+  world.fillStyle = NIGHT[2];
+  world.fillRect(0, WORLD_H - 20, WORLD_W, 20);
   drawStars(world, fieldStars, WORLD_W, WORLD_H, run.time, 12);
   drawRun(world, run);
 
+  const mag = Math.min(3, run.shake | 0);
+  const flick = Math.floor(run.time * 60);
+  const sx = mag === 0 ? 0 : (flick & 1) === 0 ? mag : -mag;
+  const sy = mag === 0 ? 0 : (flick & 2) === 0 ? 0 : mag;
   screen.drawImage(
     buffer,
-    frame.originX,
-    frame.originY,
+    frame.originX + sx,
+    frame.originY + sy,
     WORLD_W * frame.scale,
     WORLD_H * frame.scale,
   );
